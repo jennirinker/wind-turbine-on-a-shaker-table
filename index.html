@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wind turbine on a shaker table</title>
+<style>
+  body {
+    margin: 0;
+    background: #FFFFFF;
+    color: #1F2937;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  /* One phone-width column; centred on wider screens. */
+  .app {
+    max-width: 390px;
+    margin: 0 auto;
+    min-height: min(100vh, 844px);
+    min-height: min(100dvh, 844px);
+    display: flex;
+    flex-direction: column;
+  }
+  h1 { margin: 0; padding: 14px 16px 0; font-size: 17px; font-weight: 600; }
+  #scene { display: block; width: 100%; height: auto; }
+
+  /* Everything below the scene, spread evenly over the remaining height. */
+  .controls {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    padding: 4px 16px 20px;
+  }
+  #response { display: block; width: 100%; height: auto; }
+
+  /* Sliders: label + value above a grey pill-shaped line with a dark rectangular handle. */
+  .slider { display: flex; flex-direction: column; gap: 2px; }
+  .slider-head {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 7px;               /* = half the handle width, so text lines up with the ends of the line */
+    font-size: 14px;
+  }
+  .value { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .track { position: relative; height: 32px; }
+  .track::before {                /* the grey line, spanning the handle centre's travel */
+    content: "";
+    position: absolute;
+    left: 7px; right: 7px; top: 13px;
+    height: 6px;
+    border-radius: 3px;
+    background: #D9DCE1;
+    pointer-events: none;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 32px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: transparent; }
+  input[type="range"]::-moz-range-track { height: 4px; background: transparent; }
+  input[type="range"]::-moz-range-progress { background: transparent; }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px; height: 28px;
+    margin-top: -12px;
+    background: #374151;
+    border: none;
+    border-radius: 3px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 28px;
+    background: #374151;
+    border: none;
+    border-radius: 3px;
+  }
+
+  /* The shaker-frequency slider doubles as the plot's frequency axis:
+     the plot area spans x = 34..334 of the 342-wide response SVG, and the
+     handle centre must travel exactly over that span. */
+  .slider.on-axis {
+    margin-left: calc(34 / 342 * 100% - 7px);
+    width: calc(300 / 342 * 100% + 14px);
+  }
+</style>
+</head>
+<body>
+<main class="app">
+  <h1>Wind turbine on a shaker table</h1>
+
+  <svg id="scene" viewBox="0 0 390 400" role="img"
+       aria-label="Front view of the turbine on the shaker table, blades and tower coloured by deflection">
+    <defs>
+      <radialGradient id="hubGrad" cx="0.35" cy="0.35" r="0.75">
+        <stop offset="0" stop-color="#F9FAFB"/><stop offset="0.6" stop-color="#9CA3AF"/><stop offset="1" stop-color="#4B5563"/>
+      </radialGradient>
+      <radialGradient id="nacelleGrad" cx="0.4" cy="0.35" r="0.8">
+        <stop offset="0" stop-color="#E5E7EB"/><stop offset="1" stop-color="#6B7280"/>
+      </radialGradient>
+      <linearGradient id="colourBar" x1="0" x2="1">
+        <stop offset="0" stop-color="#3B4CC0"/><stop offset="0.5" stop-color="#DDDDDD"/><stop offset="1" stop-color="#B40426"/>
+      </linearGradient>
+    </defs>
+    <!-- Static parts -->
+    <ellipse cx="195" cy="394" rx="112" ry="5" fill="#000000" opacity="0.08"/>
+    <rect x="112" y="380" width="166" height="12" fill="#4B5563"/>
+    <g font-size="11" fill="#4B5563">
+      <text x="300" y="22" text-anchor="middle">deflection</text>
+      <rect x="262" y="28" width="76" height="6" rx="3" fill="url(#colourBar)"/>
+      <text x="258" y="34" text-anchor="end">−</text>
+      <text x="342" y="34">+</text>
+    </g>
+    <text x="12" y="396" font-size="12" fill="#4B5563">©Rinker</text>
+    <!-- Moving parts: filled in by the script below -->
+    <g id="moving"></g>
+  </svg>
+
+  <div class="controls">
+    <div>
+      <!-- Frequency-response panel: drawn in phase 2. -->
+      <svg id="response" viewBox="0 0 342 144" aria-hidden="true"></svg>
+      <div class="slider on-axis">
+        <div class="slider-head">
+          <label for="freq">Shaker frequency [Hz]</label>
+          <span class="value" id="freqValue"></span>
+        </div>
+        <div class="track"><input id="freq" type="range" min="0" max="1.5" step="0.01" value="0"></div>
+      </div>
+    </div>
+
+    <div class="slider">
+      <div class="slider-head">
+        <label for="rpm">Rotor speed [RPM]</label>
+        <span class="value" id="rpmValue"></span>
+      </div>
+      <div class="track"><input id="rpm" type="range" min="0" max="12" step="0.1" value="0"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+// =====================================================================
+// MODEL START  (pure functions, no page access; also run by the tests)
+// =====================================================================
+
+// Ronnie: centre mass M on tower spring kx, three blade masses m on rods of
+// length l with edgewise torsional springs giving a blade frequency f0.
+const PARAMS = {
+  M: 50000,          // equivalent rotor/nacelle/tower mass [kg]
+  kx: 200000,        // equivalent tower stiffness [N/m]
+  m: 500,            // equivalent blade mass [kg]
+  l: 30,             // equivalent blade length [m]
+  f0: 0.8,           // blade natural frequency [Hz]
+  zetaBlade: 0.02,   // blade damping ratio (single non-rotating blade)
+  zetaTower: 0.10,   // tower damping ratio (tower with rigid rotor)
+};
+
+// Small complex-number helpers: a complex number is {re, im}.
+const cx = (re, im) => ({ re: re, im: im });
+const cSub = (a, b) => cx(a.re - b.re, a.im - b.im);
+const cMul = (a, b) => cx(a.re * b.re - a.im * b.im, a.re * b.im + a.im * b.re);
+const cDiv = (a, b) => {
+  const d = b.re * b.re + b.im * b.im;
+  return cx((a.re * b.re + a.im * b.im) / d, (a.im * b.re - a.re * b.im) / d);
+};
+const cAbs = (a) => Math.hypot(a.re, a.im);
+
+// Solve the complex linear system A z = b (Gaussian elimination, partial pivoting).
+function complexSolve(A, b) {
+  const n = b.length;
+  A = A.map((row) => row.slice());
+  b = b.slice();
+  for (let k = 0; k < n; k++) {
+    let p = k;
+    for (let i = k + 1; i < n; i++) if (cAbs(A[i][k]) > cAbs(A[p][k])) p = i;
+    [A[k], A[p]] = [A[p], A[k]];
+    [b[k], b[p]] = [b[p], b[k]];
+    for (let i = k + 1; i < n; i++) {
+      const f = cDiv(A[i][k], A[k][k]);
+      for (let j = k; j < n; j++) A[i][j] = cSub(A[i][j], cMul(f, A[k][j]));
+      b[i] = cSub(b[i], cMul(f, b[k]));
+    }
+  }
+  const z = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i];
+    for (let j = i + 1; j < n; j++) s = cSub(s, cMul(A[i][j], z[j]));
+    z[i] = cDiv(s, A[i][i]);
+  }
+  return z;
+}
+
+// Fixed-frame matrices for q = [a0, a1, b1, x] (course notes, damped and
+// base-excited version), at rotor speed Omega [rad/s].
+function fixedFrameMatrices(p, Omega) {
+  const ml = p.m * p.l, ml2 = p.m * p.l * p.l;
+  const w0 = 2 * Math.PI * p.f0;
+  const ct = 2 * p.zetaBlade * ml2 * w0;
+  const cxT = 2 * p.zetaTower * Math.sqrt(p.kx * (p.M + 3 * p.m));
+  const kb = ml2 * (w0 * w0 - Omega * Omega);
+  const M = [[ml2, 0, 0, 0], [0, ml2, 0, ml], [0, 0, ml2, 0], [0, 1.5 * ml, 0, p.M + 3 * p.m]];
+  const C = [[ct, 0, 0, 0], [0, ct, 2 * ml2 * Omega, 0], [0, -2 * ml2 * Omega, ct, 0], [0, 0, 0, cxT]];
+  const K = [[ml2 * w0 * w0, 0, 0, 0], [0, kb, Omega * ct, 0], [0, -Omega * ct, kb, 0], [0, 0, 0, p.kx]];
+  return { M: M, C: C, K: K, cxT: cxT };
+}
+
+// Steady-state complex amplitudes [A0, A1, B1, X] for table motion
+// u(t) = Re{U e^{j w t}} with U = 1, at rotor speed Omega [rad/s] and
+// forcing frequency w [rad/s].
+function steadyState(p, Omega, w) {
+  const mats = fixedFrameMatrices(p, Omega);
+  const A = [];
+  for (let i = 0; i < 4; i++) {
+    A.push([]);
+    for (let j = 0; j < 4; j++) {
+      A[i].push(cx(mats.K[i][j] - w * w * mats.M[i][j], w * mats.C[i][j]));
+    }
+  }
+  const rhs = [cx(0, 0), cx(0, 0), cx(0, 0), cx(p.kx, w * mats.cxT)];
+  return complexSolve(A, rhs);
+}
+
+// Peak blade-tip deflection over time [same length unit as U]:
+// l * (|S| + |BW| + |FW|) with S = A0, BW = (A1 - jB1)/2, FW = (A1 + jB1)/2.
+function bladeTipPeak(p, Q) {
+  const A0 = Q[0], A1 = Q[1], B1 = Q[2];
+  const bw = Math.hypot(A1.re + B1.im, A1.im - B1.re) / 2;
+  const fw = Math.hypot(A1.re - B1.im, A1.im + B1.re) / 2;
+  return p.l * (cAbs(A0) + bw + fw);
+}
+
+// Largest responses (per unit table amplitude) over every slider setting.
+// Used to fix the drawing scale and the colour scale once.
+function worstCase(p, rpmMax, rpmStep, fMax, fStep) {
+  const worst = { towerDefl: 0, towerTop: 0, bladeTip: 0 };
+  const nR = Math.round(rpmMax / rpmStep), nF = Math.round(fMax / fStep);
+  for (let i = 0; i <= nR; i++) {
+    const Omega = (i * rpmStep) * 2 * Math.PI / 60;
+    for (let k = 0; k <= nF; k++) {
+      const Q = steadyState(p, Omega, 2 * Math.PI * k * fStep);
+      worst.towerDefl = Math.max(worst.towerDefl, cAbs(cSub(Q[3], cx(1, 0))));
+      worst.towerTop = Math.max(worst.towerTop, cAbs(Q[3]));
+      worst.bladeTip = Math.max(worst.bladeTip, bladeTipPeak(p, Q));
+    }
+  }
+  return worst;
+}
+
+// =====================================================================
+// MODEL END
+// =====================================================================
+
+
+// =====================================================================
+// DRAWING
+// =====================================================================
+
+// Scene geometry in SVG units (viewBox 390 x 400), as in the mockup.
+const SCENE = {
+  centreX: 195,       // rest position of table, tower and hub
+  hubY: 170,
+  bladeLength: 130,   // drawn blade length
+  tableY: 371, tableWidth: 150, tableHeight: 9,
+  maxMotion: 55,      // the worst-case motion is drawn this large
+};
+
+const RPM_MAX = 12, RPM_STEP = 0.1, F_MAX = 1.5, F_STEP = 0.01;
+
+const WORST = worstCase(PARAMS, RPM_MAX, RPM_STEP, F_MAX, F_STEP);
+// One length scale for everything: drawing units per unit of table amplitude.
+const SCALE = SCENE.maxMotion / Math.max(WORST.towerDefl, WORST.towerTop, WORST.bladeTip);
+
+// Red/blue colour for a value in [-1, 1] (blue negative, grey zero, red positive).
+function deflectionColour(v) {
+  v = Math.max(-1, Math.min(1, v));
+  const grey = [221, 221, 221], red = [180, 4, 38], blue = [59, 76, 192];
+  const end = v > 0 ? red : blue, t = Math.abs(v);
+  const c = grey.map((g, i) => Math.round(g + (end[i] - g) * t));
+  return "rgb(" + c.join(",") + ")";
+}
+
+const pointsToString = (pts) => pts.map((q) => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ");
+
+// Create an SVG element with attributes inside a parent.
+function svgEl(parent, tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  parent.appendChild(el);
+  return el;
+}
+
+// Moving parts, created once in drawing order (back to front).
+const moving = document.getElementById("moving");
+const table = svgEl(moving, "rect", { y: SCENE.tableY, width: SCENE.tableWidth, height: SCENE.tableHeight, fill: "#9CA3AF" });
+const restBlades = [0, 1, 2].map(() => ({
+  line: svgEl(moving, "line", { stroke: "#C9CDD3", "stroke-width": 2, "stroke-dasharray": "6 5" }),
+  tip: svgEl(moving, "circle", { r: 3, fill: "#D1D5DB" }),
+}));
+const tower = svgEl(moving, "polygon", { stroke: "#000000", "stroke-opacity": 0.18, "stroke-width": 0.8 });
+const towerShine = svgEl(moving, "polygon", { fill: "#FFFFFF", opacity: 0.4 });
+const nacelle = svgEl(moving, "ellipse", { rx: 17, ry: 12, fill: "url(#nacelleGrad)" });
+const blades = [0, 1, 2].map(() => ({
+  body: svgEl(moving, "polygon", { stroke: "#000000", "stroke-opacity": 0.22, "stroke-width": 0.7 }),
+  shine: svgEl(moving, "polygon", { fill: "#FFFFFF", opacity: 0.38 }),
+  tip: svgEl(moving, "circle", { r: 3.5, stroke: "#000000", "stroke-opacity": 0.25, "stroke-width": 0.7 }),
+}));
+const hub = svgEl(moving, "circle", { r: 9, fill: "url(#hubGrad)" });
+
+// Blade half-width along the span s (0 = root, 1 = tip).
+const bladeHalfWidth = (s) => s < 0.25 ? 4 + 6 * Math.sin(Math.PI / 2 * s / 0.25) : 10 - 8 * (s - 0.25) / 0.75;
+
+// Outline of a tapered blade from (hx, hy) at angle a (clockwise from up).
+// With shine = true: a thin strip along one edge, used as a highlight.
+function bladeOutline(hx, hy, a, shine) {
+  const dx = Math.sin(a), dy = -Math.cos(a);   // along the blade
+  const nx = Math.cos(a), ny = Math.sin(a);    // across the blade
+  const left = [], right = [];
+  for (let i = 0; i <= 11; i++) {
+    const s = i / 11, cxp = hx + dx * SCENE.bladeLength * s, cyp = hy + dy * SCENE.bladeLength * s;
+    const w = bladeHalfWidth(s) * (shine ? 0.9 : 1);
+    left.push([cxp + nx * w, cyp + ny * w]);
+    const w2 = shine ? 0.15 * w : -w;
+    right.push([cxp + nx * w2, cyp + ny * w2]);
+  }
+  return pointsToString(left.concat(right.reverse()));
+}
+
+// Draw one frame. u, x: table and tower-top displacement (per unit table
+// amplitude); theta: the three blade angles [rad]; psi: blade azimuths [rad].
+function drawScene(u, x, theta, psi) {
+  const uPx = u * SCALE, xPx = x * SCALE;
+  const hubX = SCENE.centreX + xPx, hubY = SCENE.hubY;
+
+  table.setAttribute("x", SCENE.centreX - SCENE.tableWidth / 2 + uPx);
+
+  // Tower: cantilever shape from the table top to the hub.
+  const left = [], right = [], shine = [];
+  for (let i = 0; i <= 14; i++) {
+    const xi = i / 14;
+    const cxp = SCENE.centreX + uPx + (xPx - uPx) * (3 * xi * xi - xi * xi * xi) / 2;
+    const y = SCENE.tableY - (SCENE.tableY - hubY) * xi;
+    const half = 9 - 4 * xi;
+    left.push([cxp - half, y]); right.push([cxp + half, y]); shine.push([cxp - 0.55 * half, y]);
+  }
+  tower.setAttribute("points", pointsToString(left.concat(right.reverse())));
+  towerShine.setAttribute("points", pointsToString(left.concat(shine.reverse())));
+  tower.setAttribute("fill", deflectionColour((x - u) / WORST.towerDefl));
+
+  nacelle.setAttribute("cx", hubX);
+  nacelle.setAttribute("cy", hubY + 2);
+  hub.setAttribute("cx", hubX);
+  hub.setAttribute("cy", hubY);
+
+  for (let i = 0; i < 3; i++) {
+    // Undeflected blade (dashed).
+    const rx = hubX + SCENE.bladeLength * Math.sin(psi[i]), ry = hubY - SCENE.bladeLength * Math.cos(psi[i]);
+    restBlades[i].line.setAttribute("x1", hubX); restBlades[i].line.setAttribute("y1", hubY);
+    restBlades[i].line.setAttribute("x2", rx); restBlades[i].line.setAttribute("y2", ry);
+    restBlades[i].tip.setAttribute("cx", rx); restBlades[i].tip.setAttribute("cy", ry);
+    // Deflected blade: the tip moves l*theta in model units, drawn at SCALE.
+    const a = psi[i] + theta[i] * PARAMS.l * SCALE / SCENE.bladeLength;
+    const colour = deflectionColour(theta[i] * PARAMS.l / WORST.bladeTip);
+    blades[i].body.setAttribute("points", bladeOutline(hubX, hubY, a, false));
+    blades[i].body.setAttribute("fill", colour);
+    blades[i].shine.setAttribute("points", bladeOutline(hubX, hubY, a, true));
+    blades[i].tip.setAttribute("cx", hubX + SCENE.bladeLength * Math.sin(a));
+    blades[i].tip.setAttribute("cy", hubY - SCENE.bladeLength * Math.cos(a));
+    blades[i].tip.setAttribute("fill", colour);
+  }
+}
+
+
+// =====================================================================
+// STATE, CONTROLS AND ANIMATION
+// =====================================================================
+
+const freqInput = document.getElementById("freq"), rpmInput = document.getElementById("rpm");
+const freqValue = document.getElementById("freqValue"), rpmValue = document.getElementById("rpmValue");
+
+let w = 0, Omega = 0;   // forcing frequency and rotor speed [rad/s]
+let Q = null;           // steady-state amplitudes [A0, A1, B1, X]
+let phase = 0;          // forcing phase w*t, accumulated so the table moves continuously
+let azimuth = 0;        // azimuth of blade 1, accumulated so the rotor turns continuously
+
+// Read the sliders and jump to the new steady state.
+function updateFromSliders() {
+  const f = Number(freqInput.value), rpm = Number(rpmInput.value);
+  w = 2 * Math.PI * f;
+  Omega = rpm * 2 * Math.PI / 60;
+  Q = steadyState(PARAMS, Omega, w);
+  freqValue.textContent = f.toFixed(2) + " Hz";
+  rpmValue.textContent = rpm.toFixed(1) + " RPM";
+}
+
+// Real part of A e^{j phase}.
+const atPhase = (A) => A.re * Math.cos(phase) - A.im * Math.sin(phase);
+
+let lastTime = null;
+function frame(time) {
+  // Real time; a long pause (e.g. hidden tab) counts as one short step.
+  const dt = lastTime === null ? 0 : Math.min((time - lastTime) / 1000, 0.1);
+  lastTime = time;
+  phase = (phase + w * dt) % (2 * Math.PI);
+  azimuth = (azimuth + Omega * dt) % (2 * Math.PI);
+
+  const u = Math.cos(phase);
+  const a0 = atPhase(Q[0]), a1 = atPhase(Q[1]), b1 = atPhase(Q[2]), x = atPhase(Q[3]);
+  const psi = [0, 1, 2].map((i) => azimuth + i * 2 * Math.PI / 3);
+  const theta = psi.map((p) => a0 + a1 * Math.cos(p) + b1 * Math.sin(p));   // Coleman transformation
+
+  drawScene(u, x, theta, psi);
+  requestAnimationFrame(frame);
+}
+
+freqInput.addEventListener("input", updateFromSliders);
+rpmInput.addEventListener("input", updateFromSliders);
+updateFromSliders();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
