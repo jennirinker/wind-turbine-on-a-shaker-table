@@ -31,6 +31,16 @@
     justify-content: space-evenly;
     padding: 4px 16px 20px;
   }
+  .panel-head {
+    display: flex;
+    flex-wrap: wrap;              /* on very narrow screens the note drops to its own line */
+    justify-content: space-between;
+    align-items: baseline;
+    column-gap: 6px;
+    margin-bottom: 4px;
+  }
+  .panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .panel-head .note { font-size: 11px; color: #4B5563; white-space: nowrap; }
   #response { display: block; width: 100%; height: auto; }
 
   /* Sliders: label + value above a grey pill-shaped line with a dark rectangular handle. */
@@ -124,8 +134,12 @@
 
   <div class="controls">
     <div>
-      <!-- Frequency-response panel: drawn in phase 2. -->
-      <svg id="response" viewBox="0 0 342 144" aria-hidden="true"></svg>
+      <div class="panel-head">
+        <h2 id="responseTitle"></h2>
+        <span class="note">▲ = natural frequencies</span>
+      </div>
+      <svg id="response" viewBox="0 0 342 144" role="img"
+           aria-label="Frequency response: tower and blade amplitude, in multiples of the table motion, against shaker frequency"></svg>
       <div class="slider on-axis">
         <div class="slider-head">
           <label for="freq">Shaker frequency [Hz]</label>
@@ -255,6 +269,70 @@ function worstCase(p, rpmMax, rpmStep, fMax, fStep) {
   return worst;
 }
 
+// Determinant of a complex square matrix (Gaussian elimination).
+function complexDet(A) {
+  const n = A.length;
+  A = A.map((row) => row.slice());
+  let det = cx(1, 0);
+  for (let k = 0; k < n; k++) {
+    let p = k;
+    for (let i = k + 1; i < n; i++) if (cAbs(A[i][k]) > cAbs(A[p][k])) p = i;
+    if (p !== k) { [A[k], A[p]] = [A[p], A[k]]; det = cx(-det.re, -det.im); }
+    if (cAbs(A[k][k]) === 0) return cx(0, 0);
+    det = cMul(det, A[k][k]);
+    for (let i = k + 1; i < n; i++) {
+      const f = cDiv(A[i][k], A[k][k]);
+      for (let j = k; j < n; j++) A[i][j] = cSub(A[i][j], cMul(f, A[k][j]));
+    }
+  }
+  return det;
+}
+
+// Undamped natural frequencies [Hz] at rotor speed Omega [rad/s], up to fMax.
+// The undamped (but gyroscopic) system has det(K - w^2 M + j w C) = 0 at its
+// natural frequencies. The collective DOF a0 is decoupled, so its frequency is
+// f0; the other three are found as sign changes of the (real) determinant of
+// the [a1, b1, x] block, refined by bisection.
+function naturalFrequencies(p, Omega, fMax) {
+  const undamped = Object.assign({}, p, { zetaBlade: 0, zetaTower: 0 });
+  const mats = fixedFrameMatrices(undamped, Omega);
+  const detAt = (f) => {
+    const w = 2 * Math.PI * f, A = [];
+    for (let i = 1; i < 4; i++) {
+      A.push([]);
+      for (let j = 1; j < 4; j++) A[i - 1].push(cx(mats.K[i][j] - w * w * mats.M[i][j], w * mats.C[i][j]));
+    }
+    return complexDet(A).re;
+  };
+  const freqs = [p.f0];
+  const df = 0.001;
+  for (let f = df; f < fMax; f += df) {
+    let lo = f, hi = f + df;
+    if (Math.sign(detAt(lo)) === Math.sign(detAt(hi))) continue;
+    for (let it = 0; it < 50; it++) {
+      const mid = (lo + hi) / 2;
+      if (Math.sign(detAt(mid)) === Math.sign(detAt(lo))) lo = mid; else hi = mid;
+    }
+    freqs.push((lo + hi) / 2);
+  }
+  return freqs.filter((f) => f <= fMax).sort((a, b) => a - b);
+}
+
+// Frequency-response curves at rotor speed Omega [rad/s], at n+1 frequencies
+// from 0 to fMax [Hz]: tower deflection relative to the table |X - 1| and the
+// blade-tip peak, both per unit table amplitude.
+function responseCurves(p, Omega, fMax, n) {
+  const f = [], tower = [], blade = [];
+  for (let k = 0; k <= n; k++) {
+    const fk = fMax * k / n;
+    const Q = steadyState(p, Omega, 2 * Math.PI * fk);
+    f.push(fk);
+    tower.push(cAbs(cSub(Q[3], cx(1, 0))));
+    blade.push(bladeTipPeak(p, Q));
+  }
+  return { f: f, tower: tower, blade: blade };
+}
+
 // =====================================================================
 // MODEL END
 // =====================================================================
@@ -380,6 +458,62 @@ function drawScene(u, x, theta, psi) {
 
 
 // =====================================================================
+// RESPONSE PANEL
+// =====================================================================
+
+// Plot area inside the 342 x 144 response SVG. The shaker-frequency slider
+// below is aligned to x = 34..334 in the CSS (.slider.on-axis).
+const PLOT = { left: 34, top: 6, width: 300, height: 120, yMax: 6, points: 600 };
+
+const plotX = (f) => f / F_MAX * PLOT.width;
+const plotY = (v) => PLOT.height - Math.min(v, PLOT.yMax) / PLOT.yMax * PLOT.height;
+
+const responseSvg = document.getElementById("response");
+const plot = svgEl(responseSvg, "g", { transform: "translate(" + PLOT.left + "," + PLOT.top + ")",
+                                       "font-size": 10, fill: "#4B5563" });
+svgEl(plot, "rect", { width: PLOT.width, height: PLOT.height, fill: "#F9FAFB", stroke: "#E5E7EB" });
+for (const v of [2, 4]) {
+  svgEl(plot, "line", { x1: 0, x2: PLOT.width, y1: plotY(v), y2: plotY(v), stroke: "#E5E7EB" });
+}
+for (const v of [0, 2, 4, 6]) {
+  svgEl(plot, "text", { x: -6, y: plotY(v) + 3, "text-anchor": "end" }).textContent = v + "×";
+}
+for (const f of [0, 0.5, 1, 1.5]) {
+  svgEl(plot, "text", { x: plotX(f), y: PLOT.height + 14, "text-anchor": "middle" }).textContent = String(f);
+}
+const markers = svgEl(plot, "g", { fill: "#9CA3AF" });
+const towerCurve = svgEl(plot, "path", { fill: "none", stroke: "#1F2937", "stroke-width": 2 });
+const bladeCurve = svgEl(plot, "path", { fill: "none", stroke: "#C2410C", "stroke-width": 2, "stroke-dasharray": "5 3" });
+// Legend, top-right corner.
+svgEl(plot, "line", { x1: PLOT.width - 74, x2: PLOT.width - 56, y1: 12, y2: 12, stroke: "#1F2937", "stroke-width": 2 });
+svgEl(plot, "text", { x: PLOT.width - 50, y: 16, "font-size": 11, fill: "#374151" }).textContent = "Tower";
+svgEl(plot, "line", { x1: PLOT.width - 74, x2: PLOT.width - 56, y1: 27, y2: 27, stroke: "#C2410C", "stroke-width": 2, "stroke-dasharray": "5 3" });
+svgEl(plot, "text", { x: PLOT.width - 50, y: 31, "font-size": 11, fill: "#374151" }).textContent = "Blade";
+// Current shaker frequency.
+const freqLine = svgEl(plot, "line", { y1: 0, y2: PLOT.height, stroke: "#6B7280", "stroke-dasharray": "3 3" });
+
+const pathFrom = (f, v) => f.map((fk, k) => (k ? "L" : "M") + plotX(fk).toFixed(1) + "," + plotY(v[k]).toFixed(1)).join(" ");
+
+// Redraw the curves and markers for rotor speed Omega [rad/s].
+function drawResponse(Omega, rpm) {
+  document.getElementById("responseTitle").textContent = "Frequency response at " + rpm.toFixed(1) + " RPM";
+  const c = responseCurves(PARAMS, Omega, F_MAX, PLOT.points);
+  towerCurve.setAttribute("d", pathFrom(c.f, c.tower));
+  bladeCurve.setAttribute("d", pathFrom(c.f, c.blade));
+  markers.replaceChildren();
+  for (const fn of naturalFrequencies(PARAMS, Omega, F_MAX)) {
+    const x = plotX(fn);
+    svgEl(markers, "polygon", { points: (x - 4) + "," + PLOT.height + " " + (x + 4) + "," + PLOT.height + " " + x + "," + (PLOT.height - 6) });
+  }
+}
+
+function drawFrequencyLine(f) {
+  freqLine.setAttribute("x1", plotX(f));
+  freqLine.setAttribute("x2", plotX(f));
+}
+
+
+// =====================================================================
 // STATE, CONTROLS AND ANIMATION
 // =====================================================================
 
@@ -390,6 +524,7 @@ let w = 0, Omega = 0;   // forcing frequency and rotor speed [rad/s]
 let Q = null;           // steady-state amplitudes [A0, A1, B1, X]
 let phase = 0;          // forcing phase w*t, accumulated so the table moves continuously
 let azimuth = 0;        // azimuth of blade 1, accumulated so the rotor turns continuously
+let shownRpm = null;    // rotor speed the response curves were last drawn for
 
 // Read the sliders and jump to the new steady state.
 function updateFromSliders() {
@@ -399,6 +534,8 @@ function updateFromSliders() {
   Q = steadyState(PARAMS, Omega, w);
   freqValue.textContent = f.toFixed(2) + " Hz";
   rpmValue.textContent = rpm.toFixed(1) + " RPM";
+  drawFrequencyLine(f);
+  if (rpm !== shownRpm) { drawResponse(Omega, rpm); shownRpm = rpm; }   // curves only change with rotor speed
 }
 
 // Real part of A e^{j phase}.
