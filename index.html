@@ -92,6 +92,17 @@
     border-radius: 3px;
   }
 
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;             /* comfortable touch target */
+    margin-left: calc(34 / 342 * 100%);   /* lines up with the plot's left edge */
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .check input { width: 20px; height: 20px; margin: 0; accent-color: #374151; cursor: pointer; }
+
   /* The shaker-frequency slider doubles as the plot's frequency axis:
      the plot area spans x = 34..334 of the 342-wide response SVG, and the
      handle centre must travel exactly over that span. */
@@ -156,6 +167,8 @@
       </div>
       <div class="track"><input id="rpm" type="range" min="0" max="12" step="0.1" value="0"></div>
     </div>
+
+    <label class="check"><input id="showCom" type="checkbox"> Show rotor centre of mass</label>
   </div>
 </main>
 
@@ -392,6 +405,9 @@ const blades = [0, 1, 2].map(() => ({
   tip: svgEl(moving, "circle", { r: 3.5, stroke: "#000000", "stroke-opacity": 0.25, "stroke-width": 0.7 }),
 }));
 const hub = svgEl(moving, "circle", { r: 9, fill: "url(#hubGrad)" });
+// Rotor centre of mass: the centre of the three blade-tip masses (rods are massless).
+const rotorCom = svgEl(moving, "circle", { r: 6, fill: "#F9FAFB", "fill-opacity": 0.85,
+                                           stroke: "#374151", "stroke-width": 2, visibility: "hidden" });
 
 // Blade half-width along the span s (0 = root, 1 = tip).
 const bladeHalfWidth = (s) => s < 0.25 ? 4 + 6 * Math.sin(Math.PI / 2 * s / 0.25) : 10 - 8 * (s - 0.25) / 0.75;
@@ -438,6 +454,7 @@ function drawScene(u, x, theta, psi) {
   hub.setAttribute("cx", hubX);
   hub.setAttribute("cy", hubY);
 
+  let comX = 0, comY = 0;
   for (let i = 0; i < 3; i++) {
     // Undeflected blade (dashed).
     const rx = hubX + SCENE.bladeLength * Math.sin(psi[i]), ry = hubY - SCENE.bladeLength * Math.cos(psi[i]);
@@ -450,10 +467,14 @@ function drawScene(u, x, theta, psi) {
     blades[i].body.setAttribute("points", bladeOutline(hubX, hubY, a, false));
     blades[i].body.setAttribute("fill", colour);
     blades[i].shine.setAttribute("points", bladeOutline(hubX, hubY, a, true));
-    blades[i].tip.setAttribute("cx", hubX + SCENE.bladeLength * Math.sin(a));
-    blades[i].tip.setAttribute("cy", hubY - SCENE.bladeLength * Math.cos(a));
+    const tipX = hubX + SCENE.bladeLength * Math.sin(a), tipY = hubY - SCENE.bladeLength * Math.cos(a);
+    blades[i].tip.setAttribute("cx", tipX);
+    blades[i].tip.setAttribute("cy", tipY);
     blades[i].tip.setAttribute("fill", colour);
+    comX += tipX / 3; comY += tipY / 3;
   }
+  rotorCom.setAttribute("cx", comX);
+  rotorCom.setAttribute("cy", comY);
 }
 
 
@@ -557,6 +578,10 @@ function frame(time) {
   drawScene(u, x, theta, psi);
   requestAnimationFrame(frame);
 }
+
+const showCom = document.getElementById("showCom");
+showCom.addEventListener("change", () => rotorCom.setAttribute("visibility", showCom.checked ? "visible" : "hidden"));
+showCom.checked = false;   // browsers may restore a checked box on reload; start hidden, as the marker is
 
 freqInput.addEventListener("input", updateFromSliders);
 rpmInput.addEventListener("input", updateFromSliders);
