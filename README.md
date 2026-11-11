@@ -1,5 +1,7 @@
 # Wind turbine on a shaker table
 
+https://jennirinker.github.io/wind-turbine-on-a-shaker-table/
+
 An interactive animation for students: a simplified three-bladed wind turbine
 ("Ronnie") stands on a shaker table that moves sideways. Students choose the
 shaker frequency and the rotor speed and see how the tower and blades respond,
@@ -11,7 +13,7 @@ with no libraries and no network access.
 ## Using it
 
 - **Locally:** open `index.html` in a browser.
-- **Online:** the repository is served with GitHub Pages (repository
+- **Online:** link at top of page. The repository is served with GitHub Pages (repository
   Settings → Pages → Deploy from a branch → main, `/(root)`). Every push to
   that branch updates the site.
 
