@@ -58,6 +58,8 @@ response"):
   `l·(|S| + |BW| + |FW|)`, and the tower curve the tower deflection relative to
   the table, `|X − 1|`, both in multiples of the table amplitude;
 - the ▲ markers are the undamped natural frequencies.
+- the blades are given 2% critical damping and the tower 10% critical damping to
+  keep motion visible at worst case
 
 ## Changing things
 
